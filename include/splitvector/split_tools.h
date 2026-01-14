@@ -76,9 +76,14 @@ constexpr inline bool isPow2(const size_t val) noexcept { return (val & (val - 1
  */
 template <typename T>
 __global__ void scan_add(T* input, T* partial_sums, size_t blockSize, size_t len) {
+   // [Use Restrict]
+   // val is not a parameter
+   // Not really a Use Restrict chance
    const T val = partial_sums[blockIdx.x];
    const size_t target1 = 2 * blockIdx.x * blockDim.x + threadIdx.x;
    const size_t target2 = target1 + blockDim.x;
+   // [Use Restrict]
+   // Use texture for input? I think not
    if (target1 < len) {
       input[target1] += val;
       if (target2 < len) {
@@ -146,6 +151,8 @@ __global__ void split_prescan(T* input, T* output, T* partial_sums, int n, size_
    int bankOffsetB = CONFLICT_FREE_OFFSET(bi);
 
    if (local_start + ai < len && local_start + bi < len) {
+      // [Use Restrict]
+      // Texture chances? I think not
       buffer[ai + bankOffsetA] = input[ai];
       buffer[bi + bankOffsetB] = input[bi];
    }
@@ -470,6 +477,10 @@ __global__ void split_compact_raw(T* input, uint32_t* counts, uint32_t* offsets,
       }
    }
    __syncthreads();
+   // Not really Use Texture chances for input, output and retval
+   // [Use Restrict]
+   // Might be Use Restrict chance for input and output
+   // Not a chance for private_index
    const unsigned int neighbor_count = split::s_pop_count(n_neighbors);
    const unsigned int private_index = buffer[offset + widb] + offsets[(wid / warps_in_block)] + neighbor_count;
    if (tres && widb != warps_in_block) {
@@ -477,6 +488,8 @@ __global__ void split_compact_raw(T* input, uint32_t* counts, uint32_t* offsets,
    }
    if (tid == 0) {
       // const unsigned int actual_total_blocks=offsets->back()+counts->back();
+      // [Use Restrict]
+      // Might be a Use Restrict chance for retval
       *retval = offsets[nBlocks - 1] + counts[nBlocks - 1];
    }
 }
@@ -601,6 +614,9 @@ void split_prefix_scan_raw(T* input, T* output, splitStackArena& mPool, const si
    }
 }
 
+// [Use Restrict]
+// Might be an chance to use const __restrict__ for output and input
+// But won't help much as it already using LDG.E
 template <typename T, typename Rule, size_t BLOCKSIZE = 1024>
 __global__ void block_compact(T* input, T* output, size_t inputSize, Rule rule, uint32_t* retval) {
    // This must be equal to at least both WARPLENGTH and MAX_BLOCKSIZE/WARPLENGTH
@@ -654,6 +670,14 @@ __global__ void block_compact(T* input, T* output, size_t inputSize, Rule rule, 
    auto pp = s_pop_count(mask & ((ONE << w_tid) - ONE));
    const auto warpTidWriteIndex = offset + pp;
    if (active) {
+      // [Use Texture]
+      // Use Texture for R9? I think not
+      // LDG.E R9, desc[UR6][R2.64];
+      // Currently 10 registers are used
+      // [Use Restrict]
+      // Might be a Use Restrict chance for output
+      // Not a chance for input
+      // No spatial locality found for the data stored in this register.
       output[warpTidWriteIndex] = input[tid];
    }
 }

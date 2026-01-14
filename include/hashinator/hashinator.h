@@ -297,6 +297,12 @@ public:
          SPLIT_CHECK_ERR(split_gpuStreamSynchronize(s));
       }
 
+      // Not really Use Restrict chances
+      // Is here a chance for Use Texture? 
+      // [Use Restrict for R6]
+      // LDG.E R6, desc[UR6][R2.64];
+      // Currently 17 registers used
+      // Prev SASS increased register pressure by 1 additional register
       auto isValidKey = [] __host__ __device__(hash_pair<KEY_TYPE, VAL_TYPE> & element) {
          if (element.first != TOMBSTONE && element.first != EMPTYBUCKET) {
             return true;
@@ -872,6 +878,7 @@ public:
          auto already_exists = split::s_warpVote(target.first == candidateKey, submask);
          if (already_exists) {
             int winner = split::s_findFirstSig(already_exists) - 1;
+            // [Warp Divergence]
             if (w_tid == winner) {
                if constexpr (!skipOverWrites) {
                   split::s_atomicExch(&buckets[probingindex].second, candidateVal);
@@ -886,17 +893,21 @@ public:
 
          while (mask && !warpDone) {
             int winner = split::s_findFirstSig(mask) - 1;
+            // [Warp Divergence]
             if (w_tid == winner) {
                KEY_TYPE old = split::s_atomicCAS(&buckets[probingindex].first, EMPTYBUCKET, candidateKey);
+               // [Warp Divergence]
                if (old == EMPTYBUCKET) {
                   threadOverflow = (probingindex < optimalindex) ? (1 << sizePower) : (probingindex - optimalindex + 1);
                   split::s_atomicExch(&buckets[probingindex].second, candidateVal);
                   warpDone = 1;
                   split::s_atomicAdd(&_mapInfo->fill, 1);
+                  // [Warp Divergence]
                   if (threadOverflow > _mapInfo->currentMaxBucketOverflow) {
                      split::s_atomicExch((unsigned long long*)(&_mapInfo->currentMaxBucketOverflow),
                                          (unsigned long long)nextOverflow(threadOverflow, defaults::WARPSIZE));
                   }
+               // [Warp Divergence]
                } else if (old == candidateKey) {
                   // Parallel stuff are fun. Major edge case!
                   if constexpr (!skipOverWrites) {
@@ -938,6 +949,7 @@ public:
       assert(isSafe && "Tried to warpInsert_V with different keys/vals in the same warp");
 #endif
 
+      // [Warp Divergence]
       for (size_t i = 0; i < (1 << sizePower); i += defaults::WARPSIZE) {
          // Check if this virtual warp is done.
          if (warpDone) {
@@ -968,8 +980,10 @@ public:
          // If any duplicate was there now is the time for the whole Virtual warp to find out!
          warpDone = split::s_warpVote(warpDone > 0, submask) & submask;
 
+         // [Warp Divergence]
          while (mask && !warpDone) {
             int winner = split::s_findFirstSig(mask) - 1;
+            // [Warp Divergence]
             if (w_tid == winner) {
                KEY_TYPE old = split::s_atomicCAS(&buckets[probingindex].first, EMPTYBUCKET, candidateKey);
                if (old == EMPTYBUCKET) {
@@ -978,10 +992,12 @@ public:
                   warpDone = 1;
                   localCount = 1;
                   split::s_atomicAdd(&_mapInfo->fill, 1);
+                  // [Warp Divergence]
                   if (threadOverflow > _mapInfo->currentMaxBucketOverflow) {
                      split::s_atomicExch((unsigned long long*)(&_mapInfo->currentMaxBucketOverflow),
                                          (unsigned long long)nextOverflow(threadOverflow, defaults::WARPSIZE));
                   }
+               // [Warp Divergence]
                } else if (old == candidateKey) {
                   // Parallel stuff are fun. Major edge case!
                   if constexpr (!skipOverWrites) {
@@ -1022,6 +1038,7 @@ public:
       assert(isSafe && "Tried to warpFind with different keys/vals in the same warp");
 #endif
 
+      // [Warp Divergence]
       for (size_t i = 0; i < maxoverflow; i += defaults::WARPSIZE) {
 
          if (warpDone) {
@@ -1038,8 +1055,10 @@ public:
          if (!maskExists && emptyFound) {
             warpDone = true;
          }
+         // [Warp Divergence]
          if (maskExists) {
             winner = split::s_findFirstSig(maskExists) - 1;
+            // [Warp Divergence]
             if (w_tid == winner) {
                candidateVal = buckets[probingindex].second;
             }
@@ -1071,6 +1090,7 @@ public:
       assert(isSafe && "Tried to warpFind with different keys/vals in the same warp");
 #endif
 
+      // [Warp Divergence]
       for (size_t i = 0; i < maxoverflow; i += defaults::WARPSIZE) {
 
          if (warpDone) {
@@ -1087,10 +1107,13 @@ public:
          if (!maskExists && emptyFound) {
             warpDone = true;
          }
+         // [Warp Divergence]
          if (maskExists) {
             winner = split::s_findFirstSig(maskExists) - 1;
+            // [Warp Divergence]
             if (w_tid == winner) {
                buckets[probingindex].first = TOMBSTONE;
+               // [Warp Divergence]
                split::s_atomicAdd(&_mapInfo->tombstoneCounter, 1);
                split::s_atomicSub((unsigned int*)&_mapInfo->fill, 1);
             }
@@ -1257,7 +1280,12 @@ public:
       int currentSizePower = _mapInfo->sizePower;
       hash_pair<KEY_TYPE, VAL_TYPE>* bck_ptr = buckets.data();
 
+      // Warp divergence
+      // cleanup
       auto isOverflown = [bck_ptr, currentSizePower] __host__ __device__(hash_pair<KEY_TYPE, VAL_TYPE> & element) {
+         // Not really Use Restrict chances
+         // Only one parameter in the lambda function
+         // Texture chances? I think not
          if (element.first == TOMBSTONE) {
             element.first = EMPTYBUCKET;
             return false;
@@ -1267,6 +1295,7 @@ public:
          }
          const size_t hashIndex = HashFunction::_hash(element.first, currentSizePower);
          const int bitMask = (1 << (currentSizePower)) - 1;
+         // Use Texture?
          bool isOverflown = (bck_ptr[hashIndex & bitMask].first != element.first);
          return isOverflown;
       };
@@ -1545,6 +1574,8 @@ public:
       int bitMask = (1 << _mapInfo->sizePower) - 1; // For efficient modulo of the array size
       auto hashIndex = hash(key);
 
+      // TODO::WarpDivergence 
+      // Might be worth improving
       // Try to find the matching bucket.
       for (size_t i = 0; i < _mapInfo->currentMaxBucketOverflow; i++) {
          const hash_pair<KEY_TYPE, VAL_TYPE>& candidate = buckets[(hashIndex + i) & bitMask];

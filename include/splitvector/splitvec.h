@@ -105,6 +105,7 @@ private:
     * @throws std::out_of_range If the index is out of range.
     */
    HOSTDEVICE void _rangeCheck(size_t index) const noexcept {
+      // [Warp Divergence]
       if (index >= size()) {
          printf("Tried indexing %d/%d\n", (int)index, (int)size());
       }
@@ -614,6 +615,9 @@ public:
     *
     * @return Number of elements in the container.
     */
+   // [Use Restrict]
+   // Not really Use Texture chances
+   // Not really Use Restrict chances
    HOSTDEVICE const size_t& size() const noexcept { return *_size; }
 
    /**
@@ -622,6 +626,9 @@ public:
     * @param index The index of the element to access.
     * @return Reference to the accessed element.
     */
+   // [Use Restrict]
+   // [Use Texture]
+   // Not really Use Restrict chances
    HOSTDEVICE T& operator[](size_t index) noexcept { return _data[index]; }
 
    /**
@@ -900,6 +907,7 @@ public:
     */
    DEVICEONLY
    void device_resize(size_t newSize, bool construct = true) {
+      // [Warp Divergence]
       if (newSize > capacity()) {
          assert(0 && "Splitvector has a catastrophic failure trying to resize on device.");
       }
@@ -971,6 +979,10 @@ public:
             _data[i].~T();
          }
       }
+      // [Use Restrict]
+      // Not really Use Restrict chance
+      // _size is a private attribute of the class
+      // LDG.E.64 R8, desc[UR36][R10.64+0x98];
       *_size = 0;
       return;
    }
@@ -1087,7 +1099,11 @@ public:
 
       // We need at least capacity=size+1 otherwise this
       // pushback cannot be done
+      // [Use Restrict]
+      // Not really a Use Restrict chance
+      // old is a local variable
       size_t old = atomicAdd((unsigned int*)_size, 1);
+      // [Warp Divergence]
       if (old >= capacity() - 1) {
          atomicSub((unsigned int*)_size, 1);
          return false;

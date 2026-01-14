@@ -31,6 +31,14 @@ __global__ void reset_all_to_empty(hash_pair<KEY_TYPE, VAL_TYPE>* dst, Hashinato
       return;
    }
 
+   // [Use Restrict] [for R4]
+   // LDG.E R4, desc[UR4][R2.64];
+   // Currently 8 registers are used
+   // Prev SASS increased register pressure by 1 additional register
+   // [Use Texture for R4]
+   // I think not
+   // The data written to this register is read from register descUR4R2.
+   // Spatial locality has not been found for the data stored in this register.
    if (dst[tid].first != EMPTYBUCKET) {
       dst[tid].first = EMPTYBUCKET;
    }
@@ -97,6 +105,15 @@ __global__ void reset_to_empty(hash_pair<KEY_TYPE, VAL_TYPE>* src, hash_pair<KEY
                                              VIRTUALWARP * subwarp_relative_index + VIRTUALWARP);
    }
 
+   // use (const) __restrict__ increases the likelihood of generating LDG
+   // But in PTX SASS it is already using LDG.E
+   // So no need to use __restrict__ here
+   // Besides, src read is happended before dst write 
+   // -> no reload src from memory is needed even if they alias
+   // But for src: might be a chance
+   // [Use Texture] [FOR R0]
+   // for candidate? I think not
+   // SASS: LDG.E R0, desc[UR6][R8.64];
    hash_pair<KEY_TYPE, VAL_TYPE> candidate = src[wid];
    const int bitMask = (1 << (sizePower)) - 1;
    const auto hashIndex = HashFunction::_hash(candidate.first, sizePower);
@@ -475,6 +492,12 @@ __global__ void insert_index_kernel(KEY_TYPE* keys, hash_pair<KEY_TYPE, VAL_TYPE
    status* err = &(info->err);
    __shared__ uint32_t addMask[WARPSIZE];
    __shared__ uint64_t warpOverflow[WARPSIZE];
+
+   // [Use Restrict]
+   // sizePower is a local variable
+   // Not sure about info: might be a chance
+   // [Use Texture]
+   // I think not
    const int sizePower = info->sizePower;
    //const size_t maxoverflow = info->currentMaxBucketOverflow;
 
@@ -491,6 +514,8 @@ __global__ void insert_index_kernel(KEY_TYPE* keys, hash_pair<KEY_TYPE, VAL_TYPE
       return;
    }
 
+   // one-time per block initialization
+   // intentionally warp divergence
    // Zero out shared count;
    if (proper_w_tid == 0 && blockWid == 0) {
       for (int i = 0; i < WARPSIZE; i++) {
@@ -538,6 +563,9 @@ __global__ void insert_index_kernel(KEY_TYPE* keys, hash_pair<KEY_TYPE, VAL_TYPE
       if (already_exists) {
          int winner = split::s_findFirstSig(already_exists) - 1;
          int sub_winner = winner - (subwarp_relative_index)*VIRTUALWARP;
+         // [Warp Divergence]
+         // intentionally warp divergence doing a atomic update
+         // avoids multiple lanes to do it
          if (w_tid == sub_winner) {
             split::s_atomicExch(&buckets[probingindex].second, candidateVal);
             // This virtual warp is now done.
@@ -551,8 +579,12 @@ __global__ void insert_index_kernel(KEY_TYPE* keys, hash_pair<KEY_TYPE, VAL_TYPE
       while (mask && !vWarpDone) {
          int winner = split::s_findFirstSig(mask) - 1;
          int sub_winner = winner - (subwarp_relative_index)*VIRTUALWARP;
+         // intentional warp divergence doing a atomic operation
+         // [Warp Divergence]
          if (w_tid == sub_winner) {
             KEY_TYPE old = split::s_atomicCAS(&buckets[probingindex].first, EMPTYBUCKET, candidateKey);
+            // [Warp Divergence]
+            // branches dependent on the result of the atomic operation
             if (old == EMPTYBUCKET) {
                threadOverflow = std::min(i+w_tid,static_cast<size_t>(1<<sizePower)) +1;
                split::s_atomicExch(&buckets[probingindex].second, candidateVal);
