@@ -122,6 +122,7 @@ public:
 
    template <typename U, typename... Args>
    __host__ __device__ void construct(U* p, Args&&... args) {
+      // [Warp Divergence]
       ::new (p) U(std::forward<Args>(args)...);
    }
 

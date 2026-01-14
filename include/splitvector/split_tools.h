@@ -470,7 +470,11 @@ __global__ void split_compact_raw(T* input, uint32_t* counts, uint32_t* offsets,
       buffer[widb] = total_valid_in_warp;
    }
    __syncthreads();
+   // [Datatype conversion]
+   // I2F
+   // [Warp Divergence]
    if (w_tid == 0 && wid % warps_in_block == 0) {
+      // [Warp Divergence]
       buffer[offset + widb] = 0;
       for (unsigned int i = 0; i < warps_in_block - 1; ++i) {
          buffer[offset + widb + i + 1] = buffer[offset + widb + i] + buffer[widb + i];
@@ -482,14 +486,20 @@ __global__ void split_compact_raw(T* input, uint32_t* counts, uint32_t* offsets,
    // Might be Use Restrict chance for input and output
    // Not a chance for private_index
    const unsigned int neighbor_count = split::s_pop_count(n_neighbors);
+   // [Datatype conversion]
+   // I2F, F2I
+   // [Use Texture]
    const unsigned int private_index = buffer[offset + widb] + offsets[(wid / warps_in_block)] + neighbor_count;
    if (tres && widb != warps_in_block) {
+      // [Use Restrict]
+      // [Use Texture]
       output[private_index] = input[tid];
    }
    if (tid == 0) {
       // const unsigned int actual_total_blocks=offsets->back()+counts->back();
       // [Use Restrict]
       // Might be a Use Restrict chance for retval
+      // [Use Texture]
       *retval = offsets[nBlocks - 1] + counts[nBlocks - 1];
    }
 }
@@ -631,6 +641,7 @@ __global__ void block_compact(T* input, T* output, size_t inputSize, Rule rule, 
    }
    __syncthreads();
    // full warp votes for rule-> mask = [01010101010101010101010101010101]
+   // [Warp Divergence]
    const int active = (tid < inputSize) ? rule(input[tid]) : false;
    const auto mask = split::s_warpVote(active == 1, SPLIT_VOTING_MASK);
    const auto warpCount = s_pop_count(mask);
@@ -639,6 +650,7 @@ __global__ void block_compact(T* input, T* output, size_t inputSize, Rule rule, 
    }
    __syncthreads();
    // Figure out the total here because we overwrite shared mem later
+   // [Warp Divergence]
    if (wid == 0) {
       // ceil int division
       int activeWARPS = nextPow2(1 + ((inputSize - 1) / WARPLENGTH));
@@ -655,6 +667,7 @@ __global__ void block_compact(T* input, T* output, size_t inputSize, Rule rule, 
       }
    }
    // Prefix scan WarpSums on the first warp
+   // [Warp Divergence]
    if (wid == 0) {
       auto value = warpSums[w_tid];
       for (int d = 1; d < warpsPerBlock; d = 2 * d) {
@@ -766,6 +779,7 @@ __global__ void loop_compact(split::SplitVector<T, split::split_unified_allocato
    while (remaining > 0) {
       int current = remaining > blockDim.x ? blockDim.x : remaining;
       __syncthreads();
+      // [Warp Divergence]
       const int active = (tid < current) ? rule(input[tid]) : false;
       const auto mask = split::s_warpVote(active == 1, SPLIT_VOTING_MASK);
       const auto warpCount = s_pop_count(mask);
@@ -774,6 +788,7 @@ __global__ void loop_compact(split::SplitVector<T, split::split_unified_allocato
       }
       __syncthreads();
       // Figure out the total here because we overwrite shared mem later
+      // [Warp Divergence]
       if (wid == 0) {
          // ceil int division
          int activeWARPS = nextPow2(1 + ((current - 1) / WARPLENGTH));
@@ -785,6 +800,7 @@ __global__ void loop_compact(split::SplitVector<T, split::split_unified_allocato
          };
          auto localCount = warpSums[w_tid];
          int totalCount = reduceCounts(localCount);
+         // [Warp Divergence]
          if (w_tid == 0) {
             outputCount = totalCount;
             outputSize += totalCount;
@@ -793,6 +809,7 @@ __global__ void loop_compact(split::SplitVector<T, split::split_unified_allocato
          }
       }
       // Prefix scan WarpSums on the first warp
+      // [Warp Divergence]
       if (wid == 0) {
          auto value = warpSums[w_tid];
          for (int d = 1; d < warpsPerBlock; d = 2 * d) {
@@ -848,6 +865,7 @@ __global__ void loop_compact_keys(split::SplitVector<T, split::split_unified_all
    while (remaining > 0) {
       int current = remaining > blockDim.x ? blockDim.x : remaining;
       __syncthreads();
+      // [Warp Divergence]
       const int active = (tid < current) ? rule(input[tid]) : false;
       const auto mask = split::s_warpVote(active == 1, SPLIT_VOTING_MASK);
       const auto warpCount = s_pop_count(mask);
@@ -856,6 +874,7 @@ __global__ void loop_compact_keys(split::SplitVector<T, split::split_unified_all
       }
       __syncthreads();
       // Figure out the total here because we overwrite shared mem later
+      // [Warp Divergence]
       if (wid == 0) {
          // ceil int division
          int activeWARPS = nextPow2(1 + ((current - 1) / WARPLENGTH));
@@ -867,6 +886,7 @@ __global__ void loop_compact_keys(split::SplitVector<T, split::split_unified_all
          };
          auto localCount = warpSums[w_tid];
          int totalCount = reduceCounts(localCount);
+         // [Warp Divergence]
          if (w_tid == 0) {
             outputCount = totalCount;
             outputSize += totalCount;
@@ -875,6 +895,7 @@ __global__ void loop_compact_keys(split::SplitVector<T, split::split_unified_all
          }
       }
       // Prefix scan WarpSums on the first warp
+      // [Warp Divergence]
       if (wid == 0) {
          auto value = warpSums[w_tid];
          for (int d = 1; d < warpsPerBlock; d = 2 * d) {

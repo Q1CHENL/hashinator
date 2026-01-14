@@ -299,11 +299,12 @@ public:
 
       // Not really Use Restrict chances
       // Is here a chance for Use Texture? 
-      // [Use Restrict for R6]
+      // [Use Restrict] for R6
       // LDG.E R6, desc[UR6][R2.64];
       // Currently 17 registers used
       // Prev SASS increased register pressure by 1 additional register
       auto isValidKey = [] __host__ __device__(hash_pair<KEY_TYPE, VAL_TYPE> & element) {
+         // [Use Restrict]
          if (element.first != TOMBSTONE && element.first != EMPTYBUCKET) {
             return true;
          }
@@ -991,6 +992,7 @@ public:
                   split::s_atomicExch(&buckets[probingindex].second, candidateVal);
                   warpDone = 1;
                   localCount = 1;
+                  // [Warp Divergence]
                   split::s_atomicAdd(&_mapInfo->fill, 1);
                   // [Warp Divergence]
                   if (threadOverflow > _mapInfo->currentMaxBucketOverflow) {
@@ -1286,16 +1288,20 @@ public:
          // Not really Use Restrict chances
          // Only one parameter in the lambda function
          // Texture chances? I think not
+         // [Warp Divergence]
          if (element.first == TOMBSTONE) {
             element.first = EMPTYBUCKET;
             return false;
          }
+         // [Warp Divergence]
          if (element.first == EMPTYBUCKET) {
             return false;
          }
          const size_t hashIndex = HashFunction::_hash(element.first, currentSizePower);
          const int bitMask = (1 << (currentSizePower)) - 1;
-         // Use Texture?
+         // [Use Restrict]
+         // [Use Texture]
+         // [Warp Divergence]
          bool isOverflown = (bck_ptr[hashIndex & bitMask].first != element.first);
          return isOverflown;
       };

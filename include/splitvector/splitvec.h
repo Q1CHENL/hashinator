@@ -616,6 +616,7 @@ public:
     * @return Number of elements in the container.
     */
    // [Use Restrict]
+   // [Use Texture]
    // Not really Use Texture chances
    // Not really Use Restrict chances
    HOSTDEVICE const size_t& size() const noexcept { return *_size; }
@@ -666,6 +667,7 @@ public:
     *
     * @return Pointer to the data.
     */
+   // [Use Restrict]
    HOSTDEVICE T* data() noexcept { return _data; }
 
    /**
@@ -912,10 +914,14 @@ public:
          assert(0 && "Splitvector has a catastrophic failure trying to resize on device.");
       }
       if (construct) {
+         // [Warp Divergence]
          for (size_t i = size(); i < newSize; ++i) {
+            // [Use Texture]
             _allocator.construct(&_data[i], T());
          }
       }
+      // [Use Restrict]
+      // [Use Texture]
       *_size = newSize;
    }
 
@@ -1081,6 +1087,7 @@ public:
    DEVICEONLY
    bool device_push_back(const T& val) {
       size_t old = atomicAdd((unsigned int*)_size, 1);
+      // [Warp Divergence]
       if (old >= capacity() - 1) {
          atomicSub((unsigned int*)_size, 1);
          return false;

@@ -35,7 +35,7 @@ __global__ void reset_all_to_empty(hash_pair<KEY_TYPE, VAL_TYPE>* dst, Hashinato
    // LDG.E R4, desc[UR4][R2.64];
    // Currently 8 registers are used
    // Prev SASS increased register pressure by 1 additional register
-   // [Use Texture for R4]
+   // [Use Texture] for R4
    // I think not
    // The data written to this register is read from register descUR4R2.
    // Spatial locality has not been found for the data stored in this register.
@@ -114,6 +114,7 @@ __global__ void reset_to_empty(hash_pair<KEY_TYPE, VAL_TYPE>* src, hash_pair<KEY
    // [Use Texture] [FOR R0]
    // for candidate? I think not
    // SASS: LDG.E R0, desc[UR6][R8.64];
+   // [Use Restrict]
    hash_pair<KEY_TYPE, VAL_TYPE> candidate = src[wid];
    const int bitMask = (1 << (sizePower)) - 1;
    const auto hashIndex = HashFunction::_hash(candidate.first, sizePower);
@@ -134,6 +135,7 @@ __global__ void reset_to_empty(hash_pair<KEY_TYPE, VAL_TYPE>* src, hash_pair<KEY
       // Note that this has to be done before voting for already existing elements (below)
       auto mask = split::s_warpVote(target.first == candidate.first, submask);
 
+      // [Warp Divergence]
       while (mask && !vWarpDone) {
          int winner = split::s_findFirstSig(mask) - 1;
          int sub_winner = winner - (subwarp_relative_index)*VIRTUALWARP;
@@ -165,6 +167,7 @@ __global__ void insert_kernel(hash_pair<KEY_TYPE, VAL_TYPE>* src, hash_pair<KEY_
    status* err = &(info->err);
    __shared__ uint32_t addMask[WARPSIZE];
    __shared__ uint64_t warpOverflow[WARPSIZE];
+   // [Use Restrict]
    const int sizePower = info->sizePower;
    //const size_t maxoverflow = info->currentMaxBucketOverflow;
    const int VIRTUALWARP = WARPSIZE / elementsPerWarp;
@@ -181,6 +184,7 @@ __global__ void insert_kernel(hash_pair<KEY_TYPE, VAL_TYPE>* src, hash_pair<KEY_
    }
 
    // Zero out shared count;
+   // [Warp Divergence]
    if (proper_w_tid == 0 && blockWid == 0) {
       for (int i = 0; i < WARPSIZE; i++) {
          addMask[i] = 0;
@@ -226,6 +230,7 @@ __global__ void insert_kernel(hash_pair<KEY_TYPE, VAL_TYPE>* src, hash_pair<KEY_
       if (already_exists) {
          int winner = split::s_findFirstSig(already_exists) - 1;
          int sub_winner = winner - (subwarp_relative_index)*VIRTUALWARP;
+         // [Warp Divergence]
          if (w_tid == sub_winner) {
             split::s_atomicExch(&buckets[probingindex].second, candidate.second);
             // This virtual warp is now done.
@@ -239,14 +244,17 @@ __global__ void insert_kernel(hash_pair<KEY_TYPE, VAL_TYPE>* src, hash_pair<KEY_
       while (mask && !vWarpDone) {
          int winner = split::s_findFirstSig(mask) - 1;
          int sub_winner = winner - (subwarp_relative_index)*VIRTUALWARP;
+         // [Warp Divergence]
          if (w_tid == sub_winner) {
             KEY_TYPE old = split::s_atomicCAS(&buckets[probingindex].first, EMPTYBUCKET, candidate.first);
+            // [Warp Divergence]
             if (old == EMPTYBUCKET) {
                threadOverflow = std::min(i+w_tid,static_cast<size_t>(1<<sizePower)) +1;
                split::s_atomicExch(&buckets[probingindex].second, candidate.second);
                vWarpDone = 1;
                // Flip the bit which corresponds to the thread that added an element
                localCount++;
+            // [Warp Divergence]
             } else if (old == candidate.first) {
                // Parallel stuff are fun. Major edge case!
                split::s_atomicExch(&buckets[probingindex].second, candidate.second);
@@ -273,6 +281,7 @@ __global__ void insert_kernel(hash_pair<KEY_TYPE, VAL_TYPE>* src, hash_pair<KEY_
    __syncwarp();
 
    // Store to shmem minding Bank Conflicts
+   // [Warp Divergence]
    if (proper_w_tid == 0) {
       // Write the count to the same place
       addMask[(blockWid)] = warpTotals;
@@ -281,10 +290,12 @@ __global__ void insert_kernel(hash_pair<KEY_TYPE, VAL_TYPE>* src, hash_pair<KEY_
 
    __syncthreads();
    // First warp in block reductions
+   // [Warp Divergence]
    if (blockWid == 0) {
       uint64_t blockOverflow = warpReduceMax<WARPSIZE>(warpOverflow[(proper_w_tid)]);
       int blockTotal = warpReduce<WARPSIZE>(addMask[(proper_w_tid)]);
       // First thread updates fill and overlfow (1 update per block)
+      // [Warp Divergence]
       if (proper_w_tid == 0) {
          atomicMax((unsigned long long*)d_overflow, (unsigned long long)nextOverflow(blockOverflow,VIRTUALWARP));
          split::s_atomicAdd(d_fill, blockTotal);
@@ -517,6 +528,7 @@ __global__ void insert_index_kernel(KEY_TYPE* keys, hash_pair<KEY_TYPE, VAL_TYPE
    // one-time per block initialization
    // intentionally warp divergence
    // Zero out shared count;
+   // [Warp Divergence]
    if (proper_w_tid == 0 && blockWid == 0) {
       for (int i = 0; i < WARPSIZE; i++) {
          addMask[i] = 0;
@@ -591,6 +603,7 @@ __global__ void insert_index_kernel(KEY_TYPE* keys, hash_pair<KEY_TYPE, VAL_TYPE
                vWarpDone = 1;
                // Flip the bit which corresponds to the thread that added an element
                localCount++;
+            // [Warp Divergence]
             } else if (old == candidateKey) {
                // Parallel stuff are fun. Major edge case!
                split::s_atomicExch(&buckets[probingindex].second, candidateVal);
@@ -617,6 +630,7 @@ __global__ void insert_index_kernel(KEY_TYPE* keys, hash_pair<KEY_TYPE, VAL_TYPE
    __syncwarp();
 
    // Store to shmem minding Bank Conflicts
+   // [Warp Divergence]
    if (proper_w_tid == 0) {
       // Write the count to the same place
       addMask[(blockWid)] = warpTotals;
@@ -625,10 +639,12 @@ __global__ void insert_index_kernel(KEY_TYPE* keys, hash_pair<KEY_TYPE, VAL_TYPE
 
    __syncthreads();
    // First warp in block reductions
+   // [Warp Divergence]
    if (blockWid == 0) {
       uint64_t blockOverflow = warpReduceMax<WARPSIZE>(warpOverflow[(proper_w_tid)]);
       int blockTotal = warpReduce<WARPSIZE>(addMask[(proper_w_tid)]);
       // First thread updates fill and overlfow (1 update per block)
+      // [Warp Divergence]
       if (proper_w_tid == 0) {
          atomicMax((unsigned long long*)d_overflow, (unsigned long long)nextOverflow(blockOverflow,VIRTUALWARP));
          split::s_atomicAdd(d_fill, blockTotal);
