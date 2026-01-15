@@ -53,6 +53,7 @@ HASHINATOR_HOSTDEVICE
 //[[nodiscard]]
 constexpr inline size_t nextOverflow(size_t currentOverflow, size_t virtualWarp) noexcept {
     size_t remainder = currentOverflow % virtualWarp;
+    // [Warp Divergence]
     return ((remainder)==0)?currentOverflow: currentOverflow + (virtualWarp - remainder);
 }
 

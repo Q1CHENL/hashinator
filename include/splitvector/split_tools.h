@@ -85,8 +85,10 @@ __global__ void scan_add(T* input, T* partial_sums, size_t blockSize, size_t len
    // [Use Restrict]
    // Use texture for input? I think not
    if (target1 < len) {
+      // [Use Texture]
       input[target1] += val;
       if (target2 < len) {
+         // [Use Texture]
          input[target2] += val;
       }
    }
@@ -161,6 +163,7 @@ __global__ void split_prescan(T* input, T* output, T* partial_sums, int n, size_
    for (int d = n >> 1; d > 0; d >>= 1) {
       __syncthreads();
 
+      // [Warp Divergence]
       if (tid < d) {
          int ai = offset * (2 * tid + 1) - 1;
          int bi = offset * (2 * tid + 2) - 1;
@@ -173,6 +176,7 @@ __global__ void split_prescan(T* input, T* output, T* partial_sums, int n, size_
    }
 
    // Exclusive scan so zero out last element (will propagate to first)
+   // [Warp Divergence]
    if (tid == 0) {
       partial_sums[blockIdx.x] = buffer[n - 1 + CONFLICT_FREE_OFFSET(n - 1)];
       buffer[n - 1 + CONFLICT_FREE_OFFSET(n - 1)] = 0;
@@ -183,6 +187,7 @@ __global__ void split_prescan(T* input, T* output, T* partial_sums, int n, size_
 
       offset >>= 1;
       __syncthreads();
+      // [Warp Divergence]
       if (tid < d) {
          int ai = offset * (2 * tid + 1) - 1;
          int bi = offset * (2 * tid + 2) - 1;

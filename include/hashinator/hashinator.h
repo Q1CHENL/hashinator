@@ -1579,22 +1579,22 @@ public:
    device_iterator device_find(KEY_TYPE key) {
       int bitMask = (1 << _mapInfo->sizePower) - 1; // For efficient modulo of the array size
       auto hashIndex = hash(key);
-
-      // TODO::WarpDivergence 
+ 
       // Might be worth improving
       // Try to find the matching bucket.
+      // [Warp Divergence]
       for (size_t i = 0; i < _mapInfo->currentMaxBucketOverflow; i++) {
          const hash_pair<KEY_TYPE, VAL_TYPE>& candidate = buckets[(hashIndex + i) & bitMask];
-
+         // [Warp Divergence]
          if (candidate.first == TOMBSTONE) {
             continue;
          }
-
+         // [Warp Divergence]
          if (candidate.first == key) {
             // Found a match, return that
             return device_iterator(*this, (hashIndex + i) & bitMask);
          }
-
+         // [Warp Divergence]
          if (candidate.first == EMPTYBUCKET) {
             // Found an empty bucket. Return empty.
             return device_end();
@@ -1710,10 +1710,12 @@ private:
       int bitMask = (1 << _mapInfo->sizePower) - 1; // For efficient modulo of the array size
       auto hashIndex = hash(key);
       size_t i = 0;
+      // [Warp Divergence]
       while (i < buckets.size()) {
          uint32_t vecindex = (hashIndex + i) & bitMask;
          KEY_TYPE old = split::s_atomicCAS(&buckets[vecindex].first, EMPTYBUCKET, key);
          // Key does not exist so we create it and incerement fill
+         // [Warp Divergence]
          if (old == EMPTYBUCKET) {
             split::s_atomicExch(&buckets[vecindex].first, key);
             split::s_atomicExch(&buckets[vecindex].second, value);
@@ -1723,6 +1725,7 @@ private:
          }
 
          // Key exists so we overwrite it. Fill stays the same
+         // [Warp Divergence]
          if (old == key) {
             split::s_atomicExch(&buckets[vecindex].second, value);
             thread_overflowLookup = i + 1;
@@ -1731,6 +1734,7 @@ private:
 
          i++;
       }
+      // [Warp Divergence]
       assert(false && "Hashmap completely overflown");
    }
 
