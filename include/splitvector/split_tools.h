@@ -475,9 +475,12 @@ __global__ void split_compact_raw(T* input, uint32_t* counts, uint32_t* offsets,
       buffer[widb] = total_valid_in_warp;
    }
    __syncthreads();
-   // [Datatype conversion]
-   // I2F
-   // [Warp Divergence]
+   // [Datatype Conversion] I2F
+   // Assessment: Not a real chance of optimization
+   // Reason:
+   // compiler often implements 32-bit integer div/mod using a fast 
+   // reciprocal-based algorithm that goes through floating-point 
+   // temporarily (convert → approximate reciprocal/divide → convert back)
    if (w_tid == 0 && wid % warps_in_block == 0) {
       // [Warp Divergence]
       buffer[offset + widb] = 0;
@@ -491,7 +494,7 @@ __global__ void split_compact_raw(T* input, uint32_t* counts, uint32_t* offsets,
    // Might be Use Restrict chance for input and output
    // Not a chance for private_index
    const unsigned int neighbor_count = split::s_pop_count(n_neighbors);
-   // [Datatype conversion]
+   // [Datatype conversion] F2I AND I2F
    // I2F, F2I
    // [Use Texture]
    const unsigned int private_index = buffer[offset + widb] + offsets[(wid / warps_in_block)] + neighbor_count;
