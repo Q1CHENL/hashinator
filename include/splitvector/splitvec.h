@@ -668,6 +668,7 @@ public:
     * @return Pointer to the data.
     */
    // [Use Restrict]
+   // [Use Texture]
    HOSTDEVICE T* data() noexcept { return _data; }
 
    /**
@@ -1086,6 +1087,7 @@ public:
     */
    DEVICEONLY
    bool device_push_back(const T& val) {
+      // [Use Restrict]
       size_t old = atomicAdd((unsigned int*)_size, 1);
       // [Warp Divergence]
       if (old >= capacity() - 1) {

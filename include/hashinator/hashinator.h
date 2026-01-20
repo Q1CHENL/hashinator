@@ -1597,6 +1597,7 @@ public:
          // [Warp Divergence]
          if (candidate.first == EMPTYBUCKET) {
             // Found an empty bucket. Return empty.
+            // [Warp Divergence]
             return device_end();
          }
       }
@@ -1728,6 +1729,7 @@ private:
          // [Warp Divergence]
          if (old == key) {
             split::s_atomicExch(&buckets[vecindex].second, value);
+            // [Warp Divergence]
             thread_overflowLookup = i + 1;
             return;
          }
